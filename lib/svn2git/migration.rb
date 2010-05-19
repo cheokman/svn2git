@@ -4,17 +4,146 @@ require 'pp'
 module Svn2Git
   DEFAULT_AUTHORS_FILE = "~/.svn2git/authors"
 
-  class Migration
-
-    attr_reader :dir
-
+	class Base 
     def initialize(args)
       @options = parse(args)
+			p args
       show_help_message("Missing SVN_URL parameter") if args.empty?
       show_help_message('Too many arguments') if args.size > 1
 
       @url = args.first
     end
+
+		def parse(args)
+			options = {}
+      options[:verbose] = false
+      options[:exclude] = []
+		end
+
+    def get_branches
+      @local = run_command("git branch -l").split(/\n/).map{|a| a.strip.split(/ /)}.flatten.collect{|b| b.strip}
+
+      @remote = run_command("git branch -r").split(/\n/).collect{|b| b.strip}
+      @tags = @remote.find_all { |b| b.strip =~ %r{^tags\/} }
+    end
+
+    def fix_tags
+      @tags.each do |tag|
+        id = tag.strip.gsub(%r{^tags\/}, '')
+        subject = `git log -1 --pretty=format:"%s" #{tag.strip()}`
+        date = `git log -1 --pretty=format:"%ci" #{tag.strip()}`
+        run_command("GIT_COMMITTER_DATE='#{date}' git tag -a -m '#{subject}' '#{id.strip()}' '#{tag.strip()}'")
+        run_command("git branch -d -r #{tag.strip()}")
+      end
+    end
+
+    def fix_branches
+      svn_branches = @remote.find_all { |b| not (@tags.include?(b) || @local.include?(b))}
+      svn_branches.each do |branch|
+        branch = branch.strip
+        next if branch == 'trunk'
+        run_command("git checkout #{branch}")
+        run_command("git checkout -b #{branch}")
+      end
+    end
+
+    def optimize_repos
+      run_command("git gc")
+    end
+
+    def run_command(cmd)
+      log "Running command: #{cmd}"
+			
+			ret = ''
+
+      IO.popen(cmd) do |stdout|
+        stdout.each do |line|
+          log line
+					ret << line
+        end
+      end
+			ret
+    end
+
+    def log(msg)
+      puts msg if @options[:verbose]
+    end
+
+    def show_help_message(msg)
+      puts "Error starting script: #{msg}\n\n"
+      puts @opts.help
+      exit
+    end
+	end
+
+
+	class Synchronization < Base
+		def run!
+			sync!
+      fix_tags
+      fix_branches
+      optimize_repos
+		end
+
+		def parse(args)
+			options = {}
+      options[:verbose] = false
+      options[:exclude] = []
+
+			@opts = OptionParser.new do |opts|
+				opts.banner = 'Usage: svn2git_sync SVN_URL [options]'
+
+				opts.separator ''
+				opts.separator 'Specific options:'
+
+       opts.on('--exclude REGEX', 'Specify a Perl regular expression to filter paths when fetching; can be used multiple times') do |regex|
+          options[:exclude] << regex
+        end
+
+        opts.on('-v', '--verbose', 'Be verbose in logging -- useful for debugging issues') do
+          options[:verbose] = true
+        end
+
+        opts.separator ""
+
+        # No argument, shows at tail.  This will print an options summary.
+        # Try it and see!
+        opts.on_tail('-h', '--help', 'Show this message') do
+          puts opts
+          exit
+				end
+			end
+      @opts.parse! args
+      options
+		end
+		
+	private
+
+		def sync!
+      exclude = @options[:exclude]
+      cmd = "git svn fetch"
+      unless exclude.empty?
+        # Add exclude paths to the command line; some versions of git support
+        # this for fetch only, later also for init.
+        regex = []
+        unless rootistrunk
+          regex << "#{trunk}[/]" unless trunk.nil?
+          regex << "#{tags}[/][^/]+[/]" unless tags.nil?
+          regex << "#{branches}[/][^/]+[/]" unless branches.nil?
+        end
+        regex = '^(?:' + regex.join('|') + ')(?:' + exclude.join('|') + ')'
+        cmd += "'--ignore-paths=#{regex}'"
+      end
+      run_command(cmd)
+
+      get_branches
+		end
+	end
+
+  class Migration < Base
+
+    attr_reader :dir
+
 
     def run!
       clone!
@@ -33,6 +162,7 @@ module Svn2Git
       options[:branches] = 'branches'
       options[:tags] = 'tags'
       options[:exclude] = []
+			options[:revision] = nil
 
       if File.exists?(File.expand_path(DEFAULT_AUTHORS_FILE))
         options[:authors] = DEFAULT_AUTHORS_FILE
@@ -45,6 +175,10 @@ module Svn2Git
 
         opts.separator ''
         opts.separator 'Specific options:'
+
+        opts.on('--revision REVISION', 'Revision ranges for partial/cauterized history to be supported. ($NUMBER, $NUMBER1:$NUMBER2(numeric ranges), $NUMBER:HEAD, and BASE:$NUMBER)') do |revision|
+          options[:revision] = revision
+        end
 
         opts.on('--trunk TRUNK_PATH', 'Subpath to trunk from repository URL (default: trunk)') do |trunk|
           options[:trunk] = trunk
@@ -111,6 +245,7 @@ module Svn2Git
       rootistrunk = @options[:rootistrunk]
       authors = @options[:authors]
       exclude = @options[:exclude]
+			revision = @options[:revision]
 
       if rootistrunk
         # Non-standard repository layout.  The repository root is effectively 'trunk.'
@@ -124,14 +259,17 @@ module Svn2Git
         cmd += "--tags=#{tags} " unless tags.nil?
         cmd += "--branches=#{branches} " unless branches.nil?
 
+
         cmd += @url
 
         run_command(cmd)
       end
 
-      run_command("git config svn.authorsfile #{authors}") unless authors.nil?
+      run_command("git config svn.authorsfile #{authors}") if authors
 
-      cmd = "git svn fetch"
+      cmd = "git svn fetch "
+      cmd += "--revision=#{revision} " unless revision.nil?
+
       unless exclude.empty?
         # Add exclude paths to the command line; some versions of git support
         # this for fetch only, later also for init.
@@ -142,42 +280,11 @@ module Svn2Git
           regex << "#{branches}[/][^/]+[/]" unless branches.nil?
         end
         regex = '^(?:' + regex.join('|') + ')(?:' + exclude.join('|') + ')'
-        cmd += " '--ignore-paths=#{regex}'"
+        cmd += "'--ignore-paths=#{regex}'"
       end
       run_command(cmd)
 
       get_branches
-    end
-
-    def get_branches
-      @local = run_command("git branch -l").split(/\n/).collect{ |b| b.strip }
-      @remote = run_command("git branch -r").split(/\n/).collect{ |b| b.strip }
-      @tags = @remote.find_all { |b| b.strip =~ %r{^tags\/} }
-    end
-
-    def fix_tags
-      @tags.each do |tag|
-        tag = tag.strip
-        id = tag.gsub(%r{^tags\/}, '').strip
-        subject = run_command("git log -1 --pretty=format:'%s' #{tag}")
-        date = run_command("git log -1 --pretty=format:'%ci' #{tag}")
-        subject = escape_quotes(subject)
-        date = escape_quotes(date)
-        id = escape_quotes(id)
-        run_command("GIT_COMMITTER_DATE='#{date}' git tag -a -m '#{subject}' '#{id}' '#{escape_quotes(tag)}'")
-        run_command("git branch -d -r #{tag}")
-      end
-    end
-
-    def fix_branches
-      svn_branches = @remote.find_all { |b| not @tags.include?(b) }
-      svn_branches.each do |branch|
-        branch = branch.strip
-        next if branch == 'trunk'
-
-        run_command("git checkout #{branch}")
-        run_command("git checkout -b #{branch}")    
-      end
     end
 
     def fix_trunk
@@ -188,39 +295,6 @@ module Svn2Git
         run_command("git checkout -f -b master")
         run_command("git branch -d -r trunk")
       end
-    end
-
-    def optimize_repos
-      run_command("git gc")
-    end
-
-    def run_command(cmd)
-      log "Running command: #{cmd}"
-
-      ret = ''
-
-      IO.popen(cmd) do |stdout|
-        stdout.each do |line|
-          log line
-          ret << line
-        end
-      end
-      
-      ret
-    end
-
-    def log(msg)
-      puts msg if @options[:verbose]
-    end
-
-    def show_help_message(msg)
-      puts "Error starting script: #{msg}\n\n"
-      puts @opts.help
-      exit
-    end
-
-    def escape_quotes(str)
-      str.gsub("'", "'\\\\''")
     end
 
   end
