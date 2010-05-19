@@ -4,7 +4,8 @@ require 'pp'
 module Svn2Git
   DEFAULT_AUTHORS_FILE = "~/.svn2git/authors"
 
-	class Base 
+
+  class Base 
     def initialize(args)
       @options = parse(args)
 			p args
@@ -14,15 +15,14 @@ module Svn2Git
       @url = args.first
     end
 
-		def parse(args)
-			options = {}
+    def parse(args)
+      options = {}
       options[:verbose] = false
       options[:exclude] = []
-		end
+    end
 
     def get_branches
       @local = run_command("git branch -l").split(/\n/).map{|a| a.strip.split(/ /)}.flatten.collect{|b| b.strip}
-
       @remote = run_command("git branch -r").split(/\n/).collect{|b| b.strip}
       @tags = @remote.find_all { |b| b.strip =~ %r{^tags\/} }
     end
@@ -53,16 +53,15 @@ module Svn2Git
 
     def run_command(cmd)
       log "Running command: #{cmd}"
-			
-			ret = ''
+      ret = ''
 
       IO.popen(cmd) do |stdout|
         stdout.each do |line|
           log line
-					ret << line
+          ret << line
         end
       end
-			ret
+      ret
     end
 
     def log(msg)
@@ -74,29 +73,28 @@ module Svn2Git
       puts @opts.help
       exit
     end
-	end
+  end
 
-
-	class Synchronization < Base
-		def run!
-			sync!
+  class Synchronization < Base
+    def run!
+      sync!
       fix_tags
       fix_branches
       optimize_repos
-		end
+    end
 
-		def parse(args)
-			options = {}
+    def parse(args)
+      options = {}
       options[:verbose] = false
       options[:exclude] = []
 
-			@opts = OptionParser.new do |opts|
-				opts.banner = 'Usage: svn2git_sync SVN_URL [options]'
+      @opts = OptionParser.new do |opts|
+        opts.banner = 'Usage: svn2git_sync SVN_URL [options]'
 
-				opts.separator ''
-				opts.separator 'Specific options:'
+        opts.separator ''
+        opts.separator 'Specific options:'
 
-       opts.on('--exclude REGEX', 'Specify a Perl regular expression to filter paths when fetching; can be used multiple times') do |regex|
+        opts.on('--exclude REGEX', 'Specify a Perl regular expression to filter paths when fetching; can be used multiple times') do |regex|
           options[:exclude] << regex
         end
 
@@ -111,20 +109,20 @@ module Svn2Git
         opts.on_tail('-h', '--help', 'Show this message') do
           puts opts
           exit
-				end
+        end
 			end
       @opts.parse! args
       options
-		end
+    end
 		
 	private
 
-		def sync!
+    def sync!
       exclude = @options[:exclude]
       cmd = "git svn fetch"
       unless exclude.empty?
-        # Add exclude paths to the command line; some versions of git support
-        # this for fetch only, later also for init.
+      # Add exclude paths to the command line; some versions of git support
+      # this for fetch only, later also for init.
         regex = []
         unless rootistrunk
           regex << "#{trunk}[/]" unless trunk.nil?
@@ -137,7 +135,7 @@ module Svn2Git
       run_command(cmd)
 
       get_branches
-		end
+    end
 	end
 
   class Migration < Base
