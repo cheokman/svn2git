@@ -5,14 +5,14 @@
 
 Gem::Specification.new do |s|
   s.name = %q{svn2git}
-  s.version = "1.3.3"
+  s.version = "1.3.4"
 
   s.required_rubygems_version = Gem::Requirement.new(">= 0") if s.respond_to? :required_rubygems_version=
   s.authors = ["James Coglan", "Kevin Menard"]
   s.date = %q{2010-03-31}
   s.default_executable = %q{svn2git}
   s.email = %q{nirvdrum@gmail.com}
-  s.executables = ["svn2git"]
+  s.executables = ["svn2git", "svn2git_sync"]
   s.extra_rdoc_files = [
     "ChangeLog.markdown",
      "README.markdown"
@@ -25,6 +25,7 @@ Gem::Specification.new do |s|
      "Rakefile",
      "VERSION.yml",
      "bin/svn2git",
+     "bin/svn2git_sync",
      "lib/svn2git.rb",
      "lib/svn2git/migration.rb",
      "svn2git.gemspec"

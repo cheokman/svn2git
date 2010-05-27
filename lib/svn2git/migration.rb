@@ -4,11 +4,9 @@ require 'pp'
 module Svn2Git
   DEFAULT_AUTHORS_FILE = "~/.svn2git/authors"
 
-
   class Base 
     def initialize(args)
       @options = parse(args)
-			p args
       show_help_message("Missing SVN_URL parameter") if args.empty?
       show_help_message('Too many arguments') if args.size > 1
 
@@ -37,13 +35,21 @@ module Svn2Git
       end
     end
 
-    def fix_branches
+    def fix_branches(temp_workdir = nil)
       svn_branches = @remote.find_all { |b| not (@tags.include?(b) || @local.include?(b))}
       svn_branches.each do |branch|
         branch = branch.strip
         next if branch == 'trunk'
-        run_command("git checkout #{branch}")
-        run_command("git checkout -b #{branch}")
+        run_command("mkdir -p #{temp_workdir}") unless temp_workdir.nil?
+        cmd = "git "
+        cmd += "--work-tree=#{temp_workdir} " unless temp_workdir.nil? 
+        cmd += "checkout #{branch} "
+        run_command(cmd)
+        cmd = "git " 
+        cmd += "--work-tree=#{temp_workdir} " unless temp_workdir.nil? 
+        cmd += "checkout -b #{branch} "
+        run_command(cmd)
+        run_command("rm -rf #{temp_workdir}") unless temp_workdir.nil?
       end
     end
 
@@ -79,7 +85,7 @@ module Svn2Git
     def run!
       sync!
       fix_tags
-      fix_branches
+      fix_branches("/tmp/test_workdir")
       optimize_repos
     end
 
